@@ -19,6 +19,7 @@ from src.tryon_pipeline import StableDiffusionXLInpaintPipeline as TryonPipeline
 
 from ip_adapter.ip_adapter import Resampler
 from diffusers.utils.import_utils import is_xformers_available
+from diffusers.utils.testing_utils import enable_full_determinism
 from typing import Literal, Tuple,List
 import torch.utils.data as data
 import math
@@ -144,7 +145,7 @@ class VitonHDDataset(data.Dataset):
         densepose_name = im_name
         densepose_map = Image.open(
             os.path.join(self.dataroot, self.phase, "image-densepose", densepose_name)
-        )
+        ).resize((self.width,self.height))
         pose_img = self.toTensor(densepose_map)  # [-1,1]
  
 
@@ -263,7 +264,7 @@ def parse_args():
     parser.add_argument("--width",type=int,default=768,)
     parser.add_argument("--height",type=int,default=1024,)
     parser.add_argument("--gradient_accumulation_steps",type=int,default=1,help="Number of updates steps to accumulate before performing a backward/update pass.",)
-    parser.add_argument("--logging_steps",type=int,default=1000,help=("Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"" training using `--resume_from_checkpoint`."),)
+    parser.add_argument("--logging_steps",type=int,default=1000,help=("Run inference on test set every X steps. If 0, no inference is run during training."),)
     parser.add_argument("--output_dir",type=str,default="output",help="The output directory where the model predictions and checkpoints will be written.",)
     parser.add_argument("--snr_gamma",type=float,default=None,help="SNR weighting gamma to be used if rebalancing the loss. Recommended value is 5.0. ""More details here: https://arxiv.org/abs/2303.09556.",)
     parser.add_argument("--num_tokens",type=int,default=16,help=("IP adapter token nums"),)
@@ -271,6 +272,8 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=1e-2, help="Weight decay to use.")
     parser.add_argument("--train_batch_size", type=int, default=6, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--test_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader.")
+    parser.add_argument("--num_workers_train", type=int, default=16)
+    parser.add_argument("--num_workers_test", type=int, default=4)
     parser.add_argument("--num_train_epochs", type=int, default=130)
     parser.add_argument("--max_train_steps",type=int,default=None,help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",)
     parser.add_argument("--noise_offset", type=float, default=None, help="noise offset")
@@ -285,7 +288,9 @@ def parse_args():
     parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
     parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
-    parser.add_argument("--data_dir", type=str, default="/home/omnious/workspace/yisol/Dataset/VITON-HD/zalando", help="For distributed training: local_rank")
+    parser.add_argument("--data_dir", type=str, default="../VITON-HD", help="For distributed training: local_rank")
+    parser.add_argument("--debug_mode", action="store_true", help="Whether to turn on full reproducibility and minimize memory requirements (for tests only).")
+
     
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -299,9 +304,13 @@ def parse_args():
 
 
 def main():
-
-
     args = parse_args()
+
+    if args.debug_mode:
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
+        enable_full_determinism()
+
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir)
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
@@ -392,7 +401,10 @@ def main():
     image_encoder.requires_grad_(False)
     unet_encoder.requires_grad_(False)
     unet.requires_grad_(True)
-
+    if args.debug_mode:
+        # Minimize memory requirements but keep one part trainable
+        unet.requires_grad_(False)
+        image_proj_model.requires_grad_(True)
 
 
 
@@ -443,7 +455,7 @@ def main():
         pin_memory=True,
         shuffle=False,
         batch_size=args.train_batch_size,
-        num_workers=16,
+        num_workers=args.num_workers_train,
     )
     test_dataset = VitonHDDataset(
         dataroot_path=args.data_dir,
@@ -455,7 +467,7 @@ def main():
         test_dataset,
         shuffle=False,
         batch_size=args.test_batch_size,
-        num_workers=4,
+        num_workers=args.num_workers_test,
     )
 
     overrode_max_train_steps = False
@@ -489,7 +501,7 @@ def main():
     for epoch in range(first_epoch, args.num_train_epochs):
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(unet), accelerator.accumulate(image_proj_model):
-                if global_step % args.logging_steps == 0:
+                if args.logging_steps != 0 and global_step % args.logging_steps == 0:
                     if accelerator.is_main_process:
                         with torch.no_grad():
                             with torch.cuda.amp.autocast():
