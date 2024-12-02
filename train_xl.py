@@ -260,6 +260,7 @@ def parse_args():
     parser.add_argument("--pretrained_garmentnet_path",type=str,default="stabilityai/stable-diffusion-xl-base-1.0",required=False,help="Path to pretrained model or model identifier from huggingface.co/models.",)
     parser.add_argument("--chkpt_every",type=int,default=10,help=("Save a checkpoint of the training state every X epochs. These checkpoints are only suitable for resuming"" training using `--resume_from_checkpoint`."),)
     parser.add_argument("--inference_every",type=int,default=10,help=("Run inference on test set every X epochs. If 0, no inference is run during training."),)
+    parser.add_argument("--first_batch_only", action="store_true", help="Whether to run inference on first batch only.")
     parser.add_argument("--pretrained_ip_adapter_path",type=str,default="ckpt/ip_adapter/ip-adapter-plus_sdxl_vit-h.bin",help="Path to pretrained ip adapter model. If not specified weights are initialized randomly.",)
     parser.add_argument("--image_encoder_path",type=str,default="ckpt/image_encoder",required=False,help="Path to CLIP image encoder",)
     parser.add_argument("--gradient_checkpointing",action="store_true",help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",)
@@ -410,7 +411,7 @@ def main():
     if args.debug_mode:
         # Minimize memory requirements but keep one part trainable
         unet.requires_grad_(False)
-        image_proj_model.requires_grad_(True)
+        image_proj_model.proj_in.requires_grad_(True)
 
 
 
@@ -780,7 +781,8 @@ def main():
                                 accelerator.get_tracker("wandb").log(
                                     {"Results": wandb_images}, step=global_step
                                 )
-                                break  # Just the first batch
+                                if args.first_batch_only:
+                                    break
 
                 del unwrapped_unet
                 del newpipe                
