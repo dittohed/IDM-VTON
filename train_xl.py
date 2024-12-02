@@ -3,6 +3,7 @@ import random
 import argparse
 import json
 import itertools
+import wandb
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
@@ -258,12 +259,12 @@ def parse_args():
     parser.add_argument("--pretrained_model_name_or_path",type=str,default="diffusers/stable-diffusion-xl-1.0-inpainting-0.1",required=False,help="Path to pretrained model or model identifier from huggingface.co/models.",)
     parser.add_argument("--pretrained_garmentnet_path",type=str,default="stabilityai/stable-diffusion-xl-base-1.0",required=False,help="Path to pretrained model or model identifier from huggingface.co/models.",)
     parser.add_argument("--chkpt_every",type=int,default=10,help=("Save a checkpoint of the training state every X epochs. These checkpoints are only suitable for resuming"" training using `--resume_from_checkpoint`."),)
+    parser.add_argument("--inference_every",type=int,default=10,help=("Run inference on test set every X epochs. If 0, no inference is run during training."),)
     parser.add_argument("--pretrained_ip_adapter_path",type=str,default="ckpt/ip_adapter/ip-adapter-plus_sdxl_vit-h.bin",help="Path to pretrained ip adapter model. If not specified weights are initialized randomly.",)
     parser.add_argument("--image_encoder_path",type=str,default="ckpt/image_encoder",required=False,help="Path to CLIP image encoder",)
     parser.add_argument("--gradient_checkpointing",action="store_true",help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",)
     parser.add_argument("--width",type=int,default=768,)
     parser.add_argument("--height",type=int,default=1024,)
-    parser.add_argument("--logging_steps",type=int,default=1000,help=("Run inference on test set every X steps. If 0, no inference is run during training."),)
     parser.add_argument("--output_dir",type=str,default="output",help="The output directory where the model predictions and checkpoints will be written.",)
     parser.add_argument("--snr_gamma",type=float,default=None,help="SNR weighting gamma to be used if rebalancing the loss. Recommended value is 5.0. ""More details here: https://arxiv.org/abs/2303.09556.",)
     parser.add_argument("--num_tokens",type=int,default=16,help=("IP adapter token nums"),)
@@ -290,7 +291,7 @@ def parse_args():
     parser.add_argument("--data_dir", type=str, default="../VITON-HD", help="For distributed training: local_rank")
     parser.add_argument("--debug_mode", action="store_true", help="Whether to turn on full reproducibility and minimize memory requirements (for tests only).")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None, help="Absolute path to an accelerate checkpoint to resume training with.")
-
+    parser.add_argument("--run_name", type=str, default=None, help="Run name for wandb logging, doesn't have to be unique.")
     
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -315,6 +316,12 @@ def main():
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
         project_config=accelerator_project_config,
+        log_with="wandb",
+    )
+    assert args.run_name is not None, "Please provide a run name for wandb logging."
+    accelerator.init_trackers(
+        project_name="IDM-VTON",
+        init_kwargs={"wandb": {"name": args.run_name}}
     )
 
     if accelerator.is_main_process:
@@ -493,7 +500,7 @@ def main():
         accelerator.load_state(args.resume_from_checkpoint)
         first_epoch = int(os.path.basename(args.resume_from_checkpoint).split("-")[-1]) + 1
         global_step = first_epoch * num_update_steps_per_epoch
-        accelerator.print(f"Resuming training from epoch {first_epoch} and global step {global_step}.")
+        accelerator.print(f"--- Resuming training from epoch {first_epoch} and global step {global_step} ---")
 
     progress_bar = tqdm(
         range(0, args.max_train_steps),
@@ -505,112 +512,7 @@ def main():
 
     for epoch in range(first_epoch, args.num_train_epochs):
         for step, batch in enumerate(train_dataloader):
-            if args.logging_steps != 0 and global_step % args.logging_steps == 0:
-                if accelerator.is_main_process:
-                    with torch.no_grad():
-                        with torch.cuda.amp.autocast():
-                            unwrapped_unet= accelerator.unwrap_model(unet)
-                            newpipe = TryonPipeline.from_pretrained(
-                                args.pretrained_model_name_or_path,
-                                unet=unwrapped_unet,
-                                vae= vae,
-                                scheduler=noise_scheduler,
-                                tokenizer=tokenizer,
-                                tokenizer_2=tokenizer_2,
-                                text_encoder=text_encoder,
-                                text_encoder_2=text_encoder_2,
-                                image_encoder=image_encoder,
-                                unet_encoder = unet_encoder,
-                                torch_dtype=torch.float16,
-                                add_watermarker=False,
-                                safety_checker=None,
-                            ).to(accelerator.device)
-                            with torch.no_grad():
-                                for sample in test_dataloader:
-                                    img_emb_list = []
-                                    for i in range(sample['cloth'].shape[0]):
-                                        img_emb_list.append(sample['cloth'][i])
-
-                                    prompt = sample["caption"]
-
-                                    num_prompts = sample['cloth'].shape[0]                                        
-                                    negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality"
-
-                                    if not isinstance(prompt, List):
-                                        prompt = [prompt] * num_prompts
-                                    if not isinstance(negative_prompt, List):
-                                        negative_prompt = [negative_prompt] * num_prompts
-
-                                    image_embeds = torch.cat(img_emb_list,dim=0)
-
-
-                                    with torch.inference_mode():
-                                        (
-                                            prompt_embeds,
-                                            negative_prompt_embeds,
-                                            pooled_prompt_embeds,
-                                            negative_pooled_prompt_embeds,
-                                        ) = newpipe.encode_prompt(
-                                            prompt,
-                                            num_images_per_prompt=1,
-                                            do_classifier_free_guidance=True,
-                                            negative_prompt=negative_prompt,
-                                        )
-                                    
-                                    
-                                        prompt = sample["caption_cloth"]
-                                        negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality"
-
-                                        if not isinstance(prompt, List):
-                                            prompt = [prompt] * num_prompts
-                                        if not isinstance(negative_prompt, List):
-                                            negative_prompt = [negative_prompt] * num_prompts
-
-
-                                        with torch.inference_mode():
-                                            (
-                                                prompt_embeds_c,
-                                                _,
-                                                _,
-                                                _,
-                                            ) = newpipe.encode_prompt(
-                                                prompt,
-                                                num_images_per_prompt=1,
-                                                do_classifier_free_guidance=False,
-                                                negative_prompt=negative_prompt,
-                                            )
-                                        
-
-
-                                        generator = torch.Generator(newpipe.device).manual_seed(args.seed) if args.seed is not None else None
-                                        images = newpipe(
-                                            prompt_embeds=prompt_embeds,
-                                            negative_prompt_embeds=negative_prompt_embeds,
-                                            pooled_prompt_embeds=pooled_prompt_embeds,
-                                            negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
-                                            num_inference_steps=args.num_inference_steps,
-                                            generator=generator,
-                                            strength = 1.0,
-                                            pose_img = sample['pose_img'],
-                                            text_embeds_cloth=prompt_embeds_c,
-                                            cloth = sample["cloth_pure"].to(accelerator.device),
-                                            mask_image=sample['inpaint_mask'],
-                                            image=(sample['image']+1.0)/2.0, 
-                                            height=args.height,
-                                            width=args.width,
-                                            guidance_scale=args.guidance_scale,
-                                            ip_adapter_image = image_embeds,
-                                        )[0]
-
-                                    for i in range(len(images)):
-                                        images[i].save(os.path.join(args.output_dir,str(global_step)+"_"+str(i)+"_"+"test.jpg"))                                    
-                                    break
-                    del unwrapped_unet
-                    del newpipe                
-                    torch.cuda.empty_cache()
-
-
-
+            
             pixel_values = batch["image"].to(dtype=vae.dtype)
             model_input = vae.encode(pixel_values).latent_dist.sample()
             model_input = model_input * vae.config.scaling_factor
@@ -774,10 +676,120 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
+        # Evaluate
+        is_last_epoch = (epoch+1 == args.num_train_epochs)
+        if args.inference_every != 0 and ((epoch+1) % args.inference_every == 0 or is_last_epoch):
+            accelerator.print(f"--- Running inference at epoch {epoch} ---")
+            if accelerator.is_main_process:
+                with torch.no_grad():
+                    with torch.cuda.amp.autocast():
+                        unwrapped_unet= accelerator.unwrap_model(unet)
+                        newpipe = TryonPipeline.from_pretrained(
+                            args.pretrained_model_name_or_path,
+                            unet=unwrapped_unet,
+                            vae= vae,
+                            scheduler=noise_scheduler,
+                            tokenizer=tokenizer,
+                            tokenizer_2=tokenizer_2,
+                            text_encoder=text_encoder,
+                            text_encoder_2=text_encoder_2,
+                            image_encoder=image_encoder,
+                            unet_encoder = unet_encoder,
+                            torch_dtype=torch.float16,
+                            add_watermarker=False,
+                            safety_checker=None,
+                        ).to(accelerator.device)
+                        with torch.no_grad():
+                            for sample in test_dataloader:
+                                img_emb_list = []
+                                for i in range(sample['cloth'].shape[0]):
+                                    img_emb_list.append(sample['cloth'][i])
+
+                                prompt = sample["caption"]
+
+                                num_prompts = sample['cloth'].shape[0]                                        
+                                negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality"
+
+                                if not isinstance(prompt, List):
+                                    prompt = [prompt] * num_prompts
+                                if not isinstance(negative_prompt, List):
+                                    negative_prompt = [negative_prompt] * num_prompts
+
+                                image_embeds = torch.cat(img_emb_list,dim=0)
+
+
+                                with torch.inference_mode():
+                                    (
+                                        prompt_embeds,
+                                        negative_prompt_embeds,
+                                        pooled_prompt_embeds,
+                                        negative_pooled_prompt_embeds,
+                                    ) = newpipe.encode_prompt(
+                                        prompt,
+                                        num_images_per_prompt=1,
+                                        do_classifier_free_guidance=True,
+                                        negative_prompt=negative_prompt,
+                                    )
+                                
+                                
+                                    prompt = sample["caption_cloth"]
+                                    negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality"
+
+                                    if not isinstance(prompt, List):
+                                        prompt = [prompt] * num_prompts
+                                    if not isinstance(negative_prompt, List):
+                                        negative_prompt = [negative_prompt] * num_prompts
+
+
+                                    with torch.inference_mode():
+                                        (
+                                            prompt_embeds_c,
+                                            _,
+                                            _,
+                                            _,
+                                        ) = newpipe.encode_prompt(
+                                            prompt,
+                                            num_images_per_prompt=1,
+                                            do_classifier_free_guidance=False,
+                                            negative_prompt=negative_prompt,
+                                        )
+                                    
+
+
+                                    generator = torch.Generator(newpipe.device).manual_seed(args.seed) if args.seed is not None else None
+                                    images = newpipe(
+                                        prompt_embeds=prompt_embeds,
+                                        negative_prompt_embeds=negative_prompt_embeds,
+                                        pooled_prompt_embeds=pooled_prompt_embeds,
+                                        negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+                                        num_inference_steps=args.num_inference_steps,
+                                        generator=generator,
+                                        strength = 1.0,
+                                        pose_img = sample['pose_img'],
+                                        text_embeds_cloth=prompt_embeds_c,
+                                        cloth = sample["cloth_pure"].to(accelerator.device),
+                                        mask_image=sample['inpaint_mask'],
+                                        image=(sample['image']+1.0)/2.0, 
+                                        height=args.height,
+                                        width=args.width,
+                                        guidance_scale=args.guidance_scale,
+                                        ip_adapter_image = image_embeds,
+                                    )[0]
+
+                                wandb_images = [wandb.Image(image) for image in images]
+                                accelerator.get_tracker("wandb").log(
+                                    {"Results": wandb_images}, step=global_step
+                                )
+                                break  # Just the first batch
+
+                del unwrapped_unet
+                del newpipe                
+                torch.cuda.empty_cache()
+
         # Store accelerator for resuming training (if needed)
         if (epoch+1) % args.chkpt_every == 0:
             save_path = os.path.join(args.output_dir, f"state-after-epoch-{epoch}")
-            accelerator.print(f"Saving training state to {save_path}.")
+            accelerator.print(f"--- Saving training state to {save_path} ---")
             accelerator.save_state(save_path)
             
     # Save the final model, to be used in inference.py
@@ -802,7 +814,7 @@ def main():
             safety_checker=None,
         )
         save_path = os.path.join(args.output_dir, f"checkpoint-after-epoch-{epoch}")
-        accelerator.print(f"Saving final checkpoint to {save_path}.")
+        accelerator.print(f"--- Saving final checkpoint to {save_path} ---")
         pipeline.save_pretrained(save_path)
 
     accelerator.end_training()
