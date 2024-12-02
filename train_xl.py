@@ -4,6 +4,7 @@ import argparse
 import json
 import itertools
 import wandb
+import boto3
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
@@ -252,6 +253,24 @@ class VitonHDDataset(data.Dataset):
         return len(self.im_names)
 
 
+def upload_dir_to_s3(s3_client: boto3.client, bucket: str, local_dir: str, s3_dir: str) -> None:
+        """
+        Args:
+            s3_client: 
+                Instance of a boto3 client.
+            bucket: 
+                S3 bucket name.
+            local_dir: 
+                Path to directory in the local filesystem.
+            s3_dir: 
+                Path to directory in the S3 bucket.
+        """
+        for root, _, files in os.walk(local_dir):
+            for file in files:
+                local_path = os.path.join(root, file)
+                relative_path = os.path.relpath(local_path, local_dir)
+                s3_file_path = os.path.join(s3_dir, relative_path)
+                s3_client.upload_file(local_path, bucket, s3_file_path)
 
 
 def parse_args():
@@ -292,7 +311,8 @@ def parse_args():
     parser.add_argument("--data_dir", type=str, default="../VITON-HD", help="For distributed training: local_rank")
     parser.add_argument("--debug_mode", action="store_true", help="Whether to turn on full reproducibility and minimize memory requirements (for tests only).")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None, help="Absolute path to an accelerate checkpoint to resume training with.")
-    parser.add_argument("--run_name", type=str, default=None, help="Run name for wandb logging, doesn't have to be unique.")
+    parser.add_argument("--run_name", type=str, default=None, help="Run name for W&B and AWS S3, should be unique to avoid overwriting in S3.")
+    parser.add_argument("--upload_to_s3", action="store_true", help="Whether to additionally upload states and checkpoints to S3.")
     
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -313,6 +333,7 @@ def main():
         random.seed(args.seed)
         enable_full_determinism()
 
+    wandb.login()
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir)
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
@@ -324,6 +345,8 @@ def main():
         project_name="IDM-VTON",
         init_kwargs={"wandb": {"name": args.run_name}}
     )
+    if args.upload_to_s3:
+        s3_client = boto3.client("s3")
 
     if accelerator.is_main_process:
         if args.output_dir is not None:
@@ -790,9 +813,12 @@ def main():
 
         # Store accelerator for resuming training (if needed)
         if (epoch+1) % args.chkpt_every == 0:
-            save_path = os.path.join(args.output_dir, f"state-after-epoch-{epoch}")
+            dir_name = f"state-after-epoch-{epoch}"
+            save_path = os.path.join(args.output_dir, dir_name)
             accelerator.print(f"--- Saving training state to {save_path} ---")
             accelerator.save_state(save_path)
+            if args.upload_to_s3:
+                upload_dir_to_s3(s3_client, "tpx-vton", save_path, f"{args.run_name}/{dir_name}")
             
     # Save the final model, to be used in inference.py
     accelerator.wait_for_everyone()
@@ -815,9 +841,12 @@ def main():
             add_watermarker=False,
             safety_checker=None,
         )
-        save_path = os.path.join(args.output_dir, f"checkpoint-after-epoch-{epoch}")
+        dir_name = f"checkpoint-after-epoch-{epoch}"
+        save_path = os.path.join(args.output_dir, dir_name)
         accelerator.print(f"--- Saving final checkpoint to {save_path} ---")
         pipeline.save_pretrained(save_path)
+        if args.upload_to_s3:
+            upload_dir_to_s3(s3_client, "tpx-vton", save_path, f"{args.run_name}/{dir_name}")
 
     accelerator.end_training()
 
