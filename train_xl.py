@@ -241,7 +241,7 @@ class VitonHDDataset(data.Dataset):
         result["cloth_pure"] = self.transform(cloth)
         result["inpaint_mask"] = 1-mask
         result["im_mask"] = im_mask
-        result["caption"] = "model is wearing " + cloth_annotation
+        result["caption"] = "model is wearing a " + cloth_annotation
         result["caption_cloth"] = "a photo of " + cloth_annotation
         result["annotation"] = cloth_annotation
         result["pose_img"] = pose_img

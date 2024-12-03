@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Literal
 from ip_adapter.ip_adapter import Resampler
 
 import argparse
+import random
 import logging
 import os
 import torch.utils.data as data
@@ -36,6 +37,7 @@ from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, Sta
 from transformers import AutoTokenizer, PretrainedConfig,CLIPImageProcessor, CLIPVisionModelWithProjection,CLIPTextModelWithProjection, CLIPTextModel, CLIPTokenizer
 
 from diffusers.utils.import_utils import is_xformers_available
+from diffusers.utils.testing_utils import enable_full_determinism
 
 from src.unet_hacked_tryon import UNet2DConditionModel
 from src.unet_hacked_garmnet import UNet2DConditionModel as UNet2DConditionModel_ref
@@ -61,6 +63,7 @@ def parse_args():
     parser.add_argument("--guidance_scale",type=float,default=2.0,)
     parser.add_argument("--mixed_precision",type=str,default=None,choices=["no", "fp16", "bf16"],)
     parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers.")
+    parser.add_argument("--debug_mode", action="store_true", help="Whether to turn on full reproducibility (for tests only).")
     args = parser.parse_args()
 
 
@@ -174,7 +177,7 @@ class VitonHDTestDataset(data.Dataset):
  
         pose_img = Image.open(
             os.path.join(self.dataroot, self.phase, "image-densepose", im_name)
-        )
+        ).resize((self.width,self.height))
         pose_img = self.transform(pose_img)  # [-1,1]
  
         result = {}
@@ -200,6 +203,12 @@ class VitonHDTestDataset(data.Dataset):
 
 def main():
     args = parse_args()
+
+    if args.debug_mode:
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
+        enable_full_determinism()
+
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir)
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
@@ -317,15 +326,15 @@ def main():
             args.pretrained_model_name_or_path,
             unet=unet,
             vae=vae,
-            feature_extractor= CLIPImageProcessor(),
-            text_encoder = text_encoder_one,
-            text_encoder_2 = text_encoder_two,
-            tokenizer = tokenizer_one,
-            tokenizer_2 = tokenizer_two,
-            scheduler = noise_scheduler,
+            scheduler=noise_scheduler,
+            tokenizer=tokenizer_one,
+            tokenizer_2=tokenizer_two,
+            text_encoder=text_encoder_one,
+            text_encoder_2=text_encoder_two,
             image_encoder=image_encoder,
-            unet_encoder = unet_encoder,
+            unet_encoder=unet_encoder,
             torch_dtype=torch.float16,
+            feature_extractor=CLIPImageProcessor(),  # Not used but code crashes when loading original ckpt
     ).to(accelerator.device)
 
     # pipe.enable_sequential_cpu_offload()
