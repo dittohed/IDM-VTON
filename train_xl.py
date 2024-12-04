@@ -683,6 +683,10 @@ def main():
                 loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
                 loss = loss.mean()
 
+            # Compute average loss across processes, 
+            # otherwise only the main process' loss will be logged
+            loss_log = accelerator.gather(loss.repeat(args.train_batch_size)).mean().item()
+
             # Backpropagate
             accelerator.backward(loss)
 
@@ -694,8 +698,8 @@ def main():
 
             progress_bar.update(1)
             global_step += 1
-            accelerator.log({"loss": loss}, step=global_step)
-            progress_bar.set_postfix({"loss": loss.detach().item()})
+            accelerator.log({"loss": loss_log}, step=global_step)
+            progress_bar.set_postfix({"loss": loss_log})
 
             if global_step >= args.max_train_steps:
                 break
