@@ -137,9 +137,7 @@ class VitonHDDataset(data.Dataset):
             os.path.join(self.dataroot, self.phase, "image", im_name)
         ).resize((self.width,self.height))
 
-        image = self.transform(im_pil_big)
-        # load parsing image
-
+        image = self.toTensor(im_pil_big)
 
         mask = Image.open(os.path.join(self.dataroot, self.phase, "agnostic-mask", im_name.replace('.jpg','_mask.png'))).resize((self.width,self.height))
         mask = self.toTensor(mask)
@@ -163,18 +161,15 @@ class VitonHDDataset(data.Dataset):
 
             if random.random()>0.5:
                 color_jitter = transforms.ColorJitter(brightness=0.5, contrast=0.3, saturation=0.5, hue=0.5)
-                fn_idx, b, c, s, h = transforms.ColorJitter.get_params(color_jitter.brightness, color_jitter.contrast, color_jitter.saturation,color_jitter.hue)
-                
-                image = TF.adjust_contrast(image, c)
-                image = TF.adjust_brightness(image, b)
-                image = TF.adjust_hue(image, h)
-                image = TF.adjust_saturation(image, s)
+                fn_idx, b, c, s, h = transforms.ColorJitter.get_params(
+                    color_jitter.brightness, 
+                    color_jitter.contrast, 
+                    color_jitter.saturation,
+                    color_jitter.hue
+                )
 
-                cloth = TF.adjust_contrast(cloth, c)
-                cloth = TF.adjust_brightness(cloth, b)
-                cloth = TF.adjust_hue(cloth, h)
-                cloth = TF.adjust_saturation(cloth, s)
-
+                image = self.apply_color_jitter(fn_idx, b, c, s, h, image)
+                cloth = self.apply_color_jitter(fn_idx, b, c, s, h, cloth)
               
             if random.random() > 0.5:
                 scale_val = random.uniform(0.8, 1.2)
@@ -219,7 +214,8 @@ class VitonHDDataset(data.Dataset):
                 )
 
 
-
+        image = self.norm(image)
+        pose_img =  self.norm(pose_img)
 
         mask = 1-mask
 
@@ -231,7 +227,6 @@ class VitonHDDataset(data.Dataset):
 
         im_mask = image * mask
 
-        pose_img =  self.norm(pose_img)
 
 
         result = {}
@@ -251,7 +246,26 @@ class VitonHDDataset(data.Dataset):
 
     def __len__(self):
         return len(self.im_names)
+    
+    @staticmethod
+    def apply_color_jitter(fn_idx, b, c, s, h, img):
+        """
+        Apply color jitter as in 
+        https://pytorch.org/vision/main/_modules/torchvision/transforms/transforms.html#ColorJitter.forward.
+        """
 
+        for fn_id in fn_idx:
+            if fn_id == 0:
+                img = F.adjust_brightness(img, b)
+            elif fn_id == 1:
+                img = F.adjust_contrast(img, c)
+            elif fn_id == 2:
+                img = F.adjust_saturation(img, s)
+            elif fn_id == 3:
+                img = F.adjust_hue(img, h)
+
+        return img
+    
 
 def upload_dir_to_s3(s3_client: boto3.client, bucket: str, local_dir: str, s3_dir: str) -> None:
         """
