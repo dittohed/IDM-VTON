@@ -256,13 +256,13 @@ class VitonHDDataset(data.Dataset):
 
         for fn_id in fn_idx:
             if fn_id == 0:
-                img = F.adjust_brightness(img, b)
+                img = TF.adjust_brightness(img, b)
             elif fn_id == 1:
-                img = F.adjust_contrast(img, c)
+                img = TF.adjust_contrast(img, c)
             elif fn_id == 2:
-                img = F.adjust_saturation(img, s)
+                img = TF.adjust_saturation(img, s)
             elif fn_id == 3:
-                img = F.adjust_hue(img, h)
+                img = TF.adjust_hue(img, h)
 
         return img
     
