@@ -129,7 +129,7 @@ class VitonHDDataset(data.Dataset):
         if c_name in self.annotation_pair:
             cloth_annotation = self.annotation_pair[c_name]
         else:
-            cloth_annotation = "shirts"
+            cloth_annotation = "shirt"
         
         cloth = Image.open(os.path.join(self.dataroot, self.phase, "cloth", c_name))
 
