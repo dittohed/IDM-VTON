@@ -3,10 +3,11 @@ download:
 	curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 	wget https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.bin?download=true
 	wget https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors?download=true
-
+	curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 
 setup:
 	unzip -qq 'zalando-hd-resized.zip?rlkey=ks83mdv2pvmrdl2oo2bmmn69w' -d VITON-HD
+	unzip awscliv2.zip
 
 	cp IDM-VTON/vitonhd_train_tagged.json VITON-HD/train/
 	cp IDM-VTON/vitonhd_test_tagged.json VITON-HD/test/
@@ -24,7 +25,9 @@ setup:
 	chmod +x IDM-VTON/upload_to_s3.sh
 
 	bash Miniconda3-latest-Linux-x86_64.sh -b -p miniconda3
+	sudo ./aws/install
 
 clean:
 	rm 'zalando-hd-resized.zip?rlkey=ks83mdv2pvmrdl2oo2bmmn69w'
 	rm Miniconda3-latest-Linux-x86_64.sh
+	rm awscliv2.zip
