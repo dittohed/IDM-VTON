@@ -20,13 +20,10 @@ setup:
 	mv model.safetensors IDM-VTON/ckpt/image_encoder/
 
 	chmod +x Miniconda3-latest-Linux-x86_64.sh
+	chmod +x IDM-VTON/train_xl.sh
+	chmod +x IDM-VTON/upload_to_s3.sh
+
 	bash Miniconda3-latest-Linux-x86_64.sh -b -p miniconda3
-	. miniconda3/bin/activate
-	conda env create -f IDM-VTON/environment.yaml
-	conda activate idm
-	pip install wandb boto3
-	pip install --force-reinstall -v "huggingface-hub==0.25.0"
-	conda install anaconda::cudatoolkit
 
 clean:
 	rm 'zalando-hd-resized.zip?rlkey=ks83mdv2pvmrdl2oo2bmmn69w'
