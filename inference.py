@@ -16,6 +16,7 @@ from ip_adapter.ip_adapter import Resampler
 
 import argparse
 import random
+import pathlib
 import logging
 import os
 import torch.utils.data as data
@@ -425,10 +426,16 @@ def main():
 
                     for i in range(len(images)):
                         x_sample = pil_to_tensor(images[i])
-                        torchvision.utils.save_image(x_sample,os.path.join(args.output_dir,sample['im_name'][i]))
+                        im_stem = pathlib.Path(sample['im_name'][i]).stem
+
+                        out_dir = os.path.join(args.output_dir, im_stem)
+                        os.makedirs(out_dir, exist_ok=True)
+
+                        torchvision.utils.save_image(
+                            x_sample,
+                            os.path.join(out_dir, im_stem+"_"+str(args.seed)+".png")
+                        )
                 
-
-
 
 if __name__ == "__main__":
     main()
