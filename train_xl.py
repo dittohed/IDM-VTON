@@ -327,6 +327,7 @@ def parse_args():
     parser.add_argument("--resume_from_checkpoint", type=str, default=None, help="Absolute path to an accelerate checkpoint to resume training with.")
     parser.add_argument("--run_name", type=str, default=None, help="Run name for W&B and AWS S3, should be unique to avoid overwriting in S3.")
     parser.add_argument("--upload_to_s3", action="store_true", help="Whether to additionally upload states and checkpoints to S3.")
+    parser.add_argument("--state_to_checkpoint", action="store_true", help="Whether to only convert state to checkpoint and terminate.")
     
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -549,6 +550,10 @@ def main():
     )
 
     for epoch in range(first_epoch, args.num_train_epochs):
+        if args.state_to_checkpoint:  # Ugly workaround to just retrieve checkpoint from state
+            epoch -= 1
+            break
+
         for step, batch in enumerate(train_dataloader):
             
             pixel_values = batch["image"].to(dtype=vae.dtype)
