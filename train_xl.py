@@ -287,6 +287,13 @@ def upload_dir_to_s3(s3_client: boto3.client, bucket: str, local_dir: str, s3_di
                 s3_client.upload_file(local_path, bucket, s3_file_path)
 
 
+def check_nan_inf(accelerator: Accelerator, tensor: torch.Tensor, tensor_name: str) -> None:
+    if torch.isnan(tensor).any():
+        accelerator.print(f"Found NaN values in {tensor_name}.")
+    elif torch.isinf(tensor).any():
+        accelerator.print(f"Found infinite values in {tensor_name}.")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument("--pretrained_model_name_or_path",type=str,default="diffusers/stable-diffusion-xl-1.0-inpainting-0.1",required=False,help="Path to pretrained model or model identifier from huggingface.co/models.",)
@@ -328,6 +335,8 @@ def parse_args():
     parser.add_argument("--run_name", type=str, default=None, help="Run name for W&B and AWS S3, should be unique to avoid overwriting in S3.")
     parser.add_argument("--upload_to_s3", action="store_true", help="Whether to additionally upload states and checkpoints to S3.")
     parser.add_argument("--state_to_checkpoint", action="store_true", help="Whether to only convert state to checkpoint and terminate.")
+    parser.add_argument("--force_epsilon_update", action="store_true", help="Whether to overwrite optimizer's epsilon value(s) with the CLI one after resuming from checkpoint.")
+    parser.add_argument("--check_nan_inf", action="store_true", help="Whether to keep checking if particular tensors contain NaN or -inf/inf.")
     
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -541,6 +550,10 @@ def main():
         global_step = first_epoch * num_update_steps_per_epoch
         accelerator.print(f"--- Resuming training from epoch {first_epoch} and global step {global_step} ---")
 
+        if args.force_epsilon_update:
+            for param_group in optimizer.param_groups:
+                param_group['eps'] = args.adam_epsilon
+
     progress_bar = tqdm(
         range(0, args.max_train_steps),
         initial=global_step,
@@ -555,6 +568,10 @@ def main():
             break
 
         for step, batch in enumerate(train_dataloader):
+            if args.check_nan_inf:
+                for key in batch.keys():
+                    if isinstance(batch[key], torch.Tensor):
+                        check_nan_inf(accelerator, batch[key], f"model input ({key})")
             
             pixel_values = batch["image"].to(dtype=vae.dtype)
             model_input = vae.encode(pixel_values).latent_dist.sample()
@@ -669,7 +686,8 @@ def main():
             reference_features = list(reference_features)
 
             noise_pred = unet(latent_model_input, timesteps, encoder_hidden_states,added_cond_kwargs=unet_added_cond_kwargs,garment_features=reference_features).sample
-
+            if args.check_nan_inf:
+                check_nan_inf(accelerator, noise_pred, "model output")
 
             if noise_scheduler.config.prediction_type == "epsilon":
                 target = noise
@@ -702,6 +720,9 @@ def main():
                 loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
                 loss = loss.mean()
 
+            if args.check_nan_inf:
+                check_nan_inf(accelerator, loss, "loss")
+
             # Compute average loss across processes, 
             # otherwise only the main process' loss will be logged
             loss_log = accelerator.gather(loss.repeat(args.train_batch_size)).mean().item()
@@ -714,6 +735,10 @@ def main():
 
             optimizer.step()
             optimizer.zero_grad()
+
+            if args.check_nan_inf:
+                for name, param in unet.named_parameters():
+                    check_nan_inf(accelerator, param, f"model params ({name})")
 
             progress_bar.update(1)
             global_step += 1
