@@ -160,7 +160,7 @@ class VitonHDDataset(data.Dataset):
 
 
             if random.random()>0.5:
-                color_jitter = transforms.ColorJitter(brightness=0.5, contrast=0.3, saturation=0.5, hue=0.5)
+                color_jitter = transforms.ColorJitter(brightness=0.15, contrast=0.25, saturation=0.05, hue=0.05)
                 fn_idx, b, c, s, h = transforms.ColorJitter.get_params(
                     color_jitter.brightness, 
                     color_jitter.contrast, 
