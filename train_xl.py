@@ -46,17 +46,7 @@ class VitonHDDataset(data.Dataset):
         self.width = size[1]
         self.size = size
 
-
         self.norm = transforms.Normalize([0.5], [0.5])
-        self.transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
-        self.transform2D = transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
-        )
         self.toTensor = transforms.ToTensor()
 
         with open(
@@ -121,7 +111,8 @@ class VitonHDDataset(data.Dataset):
         self.c_names = c_names
         self.dataroot_names = dataroot_names
         self.flip_transform = transforms.RandomHorizontalFlip(p=1)
-        self.clip_processor = CLIPImageProcessor()
+        self.clip_processor = CLIPImageProcessor(do_rescale=False)
+
     def __getitem__(self, index):
         c_name = self.c_names[index]
         im_name = self.im_names[index]
@@ -132,11 +123,11 @@ class VitonHDDataset(data.Dataset):
             cloth_annotation = "shirt"
         
         cloth = Image.open(os.path.join(self.dataroot, self.phase, "cloth", c_name))
+        cloth = self.toTensor(cloth)
 
         im_pil_big = Image.open(
             os.path.join(self.dataroot, self.phase, "image", im_name)
         ).resize((self.width,self.height))
-
         image = self.toTensor(im_pil_big)
 
         mask = Image.open(os.path.join(self.dataroot, self.phase, "agnostic-mask", im_name.replace('.jpg','_mask.png'))).resize((self.width,self.height))
@@ -233,7 +224,7 @@ class VitonHDDataset(data.Dataset):
         result["c_name"] = c_name
         result["image"] = image
         result["cloth"] = cloth_trim
-        result["cloth_pure"] = self.transform(cloth)
+        result["cloth_pure"] = self.norm(cloth)
         result["inpaint_mask"] = 1-mask
         result["im_mask"] = im_mask
         result["caption"] = "model is wearing a " + cloth_annotation
