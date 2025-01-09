@@ -20,7 +20,7 @@ conda install anaconda::cudatoolkit
 
 Step 3 (other tools):
 ```
-accelerate config  # Set to FP16
+accelerate config  # Set to bf16
 # Set W&B and AWS env variables
 ```
 

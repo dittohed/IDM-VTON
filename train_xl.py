@@ -278,11 +278,15 @@ def upload_dir_to_s3(s3_client: boto3.client, bucket: str, local_dir: str, s3_di
                 s3_client.upload_file(local_path, bucket, s3_file_path)
 
 
-def check_nan_inf(accelerator: Accelerator, tensor: torch.Tensor, tensor_name: str) -> None:
+def check_nan_inf(accelerator: Accelerator, tensor: torch.Tensor, tensor_name: str) -> bool:
     if torch.isnan(tensor).any():
         accelerator.print(f"Found NaN values in {tensor_name}.")
+        return True
     elif torch.isinf(tensor).any():
         accelerator.print(f"Found infinite values in {tensor_name}.")
+        return True
+
+    return False
 
 
 def parse_args():
@@ -433,7 +437,7 @@ def main():
         weight_dtype = torch.float16
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
-    vae.to(accelerator.device) 
+    vae.to(accelerator.device, dtype=weight_dtype) 
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     text_encoder_2.to(accelerator.device, dtype=weight_dtype)
     image_encoder.to(accelerator.device, dtype=weight_dtype)
@@ -559,10 +563,13 @@ def main():
             break
 
         for step, batch in enumerate(train_dataloader):
+            nan_inf_occured = False
+
             if args.check_nan_inf:
                 for key in batch.keys():
                     if isinstance(batch[key], torch.Tensor):
-                        check_nan_inf(accelerator, batch[key], f"model input ({key})")
+                        if check_nan_inf(accelerator, batch[key], f"model input ({key})"):
+                            nan_inf_occured = True
             
             pixel_values = batch["image"].to(dtype=vae.dtype)
             model_input = vae.encode(pixel_values).latent_dist.sample()
@@ -678,7 +685,8 @@ def main():
 
             noise_pred = unet(latent_model_input, timesteps, encoder_hidden_states,added_cond_kwargs=unet_added_cond_kwargs,garment_features=reference_features).sample
             if args.check_nan_inf:
-                check_nan_inf(accelerator, noise_pred, "model output")
+                if check_nan_inf(accelerator, noise_pred, "model output"):
+                    nan_inf_occured = True
 
             if noise_scheduler.config.prediction_type == "epsilon":
                 target = noise
@@ -712,7 +720,8 @@ def main():
                 loss = loss.mean()
 
             if args.check_nan_inf:
-                check_nan_inf(accelerator, loss, "loss")
+                if check_nan_inf(accelerator, loss, "loss"):
+                    nan_inf_occured = True
 
             # Compute average loss across processes, 
             # otherwise only the main process' loss will be logged
@@ -729,7 +738,8 @@ def main():
 
             if args.check_nan_inf:
                 for name, param in unet.named_parameters():
-                    check_nan_inf(accelerator, param, f"model params ({name})")
+                    if check_nan_inf(accelerator, param, f"model params ({name})"):
+                        nan_inf_occured = True
 
             progress_bar.update(1)
             global_step += 1
@@ -739,6 +749,11 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
+            if nan_inf_occured:
+                save_path = os.path.join(args.output_dir, "state-after-instability")
+                if not os.path.isdir(save_path):
+                    accelerator.print(f"--- Saving training state to {save_path} ---")
+                    accelerator.save_state(save_path)
         # Evaluate
         is_last_epoch = (epoch+1 == args.num_train_epochs)
         if args.inference_every != 0 and ((epoch+1) % args.inference_every == 0 or is_last_epoch):
