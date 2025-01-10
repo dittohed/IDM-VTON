@@ -8,14 +8,11 @@ make setup
 make clean
 ```
 
-Step 2 (conda):
+Step 2 (environment):
 ```
-source miniconda3/bin/activate
-conda env create -f IDM-VTON/environment.yaml
-conda activate idm
-pip install wandb boto3
-pip install --force-reinstall -v "huggingface-hub==0.25.0"
-conda install anaconda::cudatoolkit
+python -m venv idm  # Tested with Python 3.10.12 only
+source idm/bin/activate
+pip install -r IDM-VTON/requirements.txt
 ```
 
 Step 3 (other tools):
