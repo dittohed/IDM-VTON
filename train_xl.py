@@ -330,7 +330,7 @@ def parse_args():
     parser.add_argument("--run_name", type=str, default=None, help="Run name for W&B and AWS S3, should be unique to avoid overwriting in S3.")
     parser.add_argument("--upload_to_s3", action="store_true", help="Whether to additionally upload states and checkpoints to S3.")
     parser.add_argument("--state_to_checkpoint", action="store_true", help="Whether to only convert state to checkpoint and terminate.")
-    parser.add_argument("--force_epsilon_update", action="store_true", help="Whether to overwrite optimizer's epsilon value(s) with the CLI one after resuming from checkpoint.")
+    parser.add_argument("--force_adam_update", action="store_true", help="Whether to overwrite Adam parameters with the CLI ones after resuming from checkpoint.")
     parser.add_argument("--check_nan_inf", action="store_true", help="Whether to keep checking if particular tensors contain NaN or -inf/inf.")
     
     args = parser.parse_args()
@@ -545,9 +545,11 @@ def main():
         global_step = first_epoch * num_update_steps_per_epoch
         accelerator.print(f"--- Resuming training from epoch {first_epoch} and global step {global_step} ---")
 
-        if args.force_epsilon_update:
+        if args.force_adam_update:
             for param_group in optimizer.param_groups:
-                param_group['eps'] = args.adam_epsilon
+                param_group["lr"] = args.learning_rate
+                param_group["eps"] = args.adam_epsilon
+                param_group["weight_decay"] = args.weight_decay
 
     progress_bar = tqdm(
         range(0, args.max_train_steps),
