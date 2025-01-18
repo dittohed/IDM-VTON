@@ -305,7 +305,6 @@ def parse_args():
     parser.add_argument("--snr_gamma",type=float,default=None,help="SNR weighting gamma to be used if rebalancing the loss. Recommended value is 5.0. ""More details here: https://arxiv.org/abs/2303.09556.",)
     parser.add_argument("--num_tokens",type=int,default=16,help=("IP adapter token nums"),)
     parser.add_argument("--learning_rate",type=float,default=1e-5,help="Learning rate to use.",)
-    parser.add_argument("--weight_decay", type=float, default=1e-2, help="Weight decay to use.")
     parser.add_argument("--train_batch_size", type=int, default=6, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--test_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--num_workers_train", type=int, default=16)
@@ -549,7 +548,7 @@ def main():
             for param_group in optimizer.param_groups:
                 param_group["lr"] = args.learning_rate
                 param_group["eps"] = args.adam_epsilon
-                param_group["weight_decay"] = args.weight_decay
+                param_group["weight_decay"] = args.adam_weight_decay
 
     progress_bar = tqdm(
         range(0, args.max_train_steps),
