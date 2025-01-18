@@ -3,6 +3,8 @@ Step 1 (basic setup):
 git clone https://github.com/dittohed/IDM-VTON.git
 sudo apt-get install build-essential unzip
 mv IDM-VTON/Makefile .
+# Set AWS env variables
+export DATASET_S3_URI=s3://<BUCKET>/<PATH>
 make download
 make setup
 make clean
@@ -17,12 +19,12 @@ pip install -r IDM-VTON/requirements.txt
 
 Step 3 (other tools):
 ```
-accelerate config  # Set to bf16
-# Set W&B and AWS env variables
+accelerate config  # Set to FP16
 ```
 
 Step 4 (run in parallel):
 ```
+# Set W&B variable
 cd IDM-VTON
 ./train_xl.sh
 ```

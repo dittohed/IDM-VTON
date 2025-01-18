@@ -1,12 +1,13 @@
 download:
-	wget https://www.dropbox.com/scl/fi/xu08cx3fxmiwpg32yotd7/zalando-hd-resized.zip?rlkey=ks83mdv2pvmrdl2oo2bmmn69w&e=1&st=cw2jav9b&dl=0
 	wget https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.bin?download=true
 	wget https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors?download=true
 	curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 
 setup:
-	unzip -qq 'zalando-hd-resized.zip?rlkey=ks83mdv2pvmrdl2oo2bmmn69w' -d VITON-HD
 	unzip awscliv2.zip
+	sudo ./aws/install
+	aws s3 cp ${DATASET_S3_URI} ./
+	unzip -qq VITON-HD.zip
 
 	cp IDM-VTON/vitonhd_train_tagged.json VITON-HD/train/
 	cp IDM-VTON/vitonhd_test_tagged.json VITON-HD/test/
@@ -22,8 +23,6 @@ setup:
 	chmod +x IDM-VTON/train_xl.sh
 	chmod +x IDM-VTON/upload_to_s3.sh
 
-	sudo ./aws/install
-
 clean:
-	rm 'zalando-hd-resized.zip?rlkey=ks83mdv2pvmrdl2oo2bmmn69w'
+	rm VITON-HD.zip
 	rm awscliv2.zip
